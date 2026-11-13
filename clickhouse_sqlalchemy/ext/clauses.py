@@ -2,15 +2,16 @@ from sqlalchemy import exc
 from sqlalchemy.sql import type_api, roles
 from sqlalchemy.sql.elements import (
     BindParameter,
+    ClauseElement,
     ColumnElement,
     ClauseList
 )
 from sqlalchemy.sql.util import _offset_or_limit_clause
-from sqlalchemy.sql.visitors import Visitable
+from sqlalchemy.sql.visitors import InternalTraversal, Visitable
 
 
 class SampleParam(BindParameter):
-    pass
+    inherit_cache = True
 
 
 def sample_clause(element):
@@ -30,7 +31,12 @@ def sample_clause(element):
         return SampleParam(None, element, unique=True)
 
 
-class LimitByClause:
+class LimitByClause(ClauseElement):
+    _traverse_internals = [
+        ('by_clauses', InternalTraversal.dp_clauseelement),
+        ('offset', InternalTraversal.dp_clauseelement),
+        ('limit', InternalTraversal.dp_clauseelement),
+    ]
 
     def __init__(self, by_clauses, limit, offset):
         self.by_clauses = ClauseList(
@@ -47,6 +53,8 @@ class Lambda(ColumnElement):
     """Represent a lambda function, ``Lambda(lambda x: 2 * x)``."""
 
     __visit_name__ = 'lambda'
+    # The SQL comes from calling func, which a cache key cannot capture.
+    inherit_cache = False
 
     def __init__(self, func):
         if not callable(func):
@@ -58,7 +66,9 @@ class Lambda(ColumnElement):
 
 class ArrayJoin(ClauseList):
     __visit_name__ = 'array_join'
+    inherit_cache = True
 
 
 class LeftArrayJoin(ClauseList):
     __visit_name__ = 'left_array_join'
+    inherit_cache = True

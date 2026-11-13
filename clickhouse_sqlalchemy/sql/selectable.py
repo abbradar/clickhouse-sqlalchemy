@@ -2,6 +2,7 @@ from sqlalchemy.sql.base import _generative
 from sqlalchemy.sql.selectable import (
     Select as StandardSelect,
 )
+from sqlalchemy.sql.visitors import InternalTraversal
 
 from ..ext.clauses import (
     ArrayJoin,
@@ -14,7 +15,25 @@ from ..ext.clauses import (
 __all__ = ('Select', 'select')
 
 
+_clickhouse_traverse_internals = [
+    ('_with_cube', InternalTraversal.dp_boolean),
+    ('_with_rollup', InternalTraversal.dp_boolean),
+    ('_with_totals', InternalTraversal.dp_boolean),
+    ('_final_clause', InternalTraversal.dp_boolean),
+    ('_sample_clause', InternalTraversal.dp_clauseelement),
+    ('_limit_by_clause', InternalTraversal.dp_clauseelement),
+    ('_array_join', InternalTraversal.dp_clauseelement),
+]
+
+
 class Select(StandardSelect):
+    _traverse_internals = (
+        StandardSelect._traverse_internals + _clickhouse_traverse_internals
+    )
+    _cache_key_traversal = (
+        StandardSelect._cache_key_traversal + _clickhouse_traverse_internals
+    )
+
     _with_cube = False
     _with_rollup = False
     _with_totals = False
