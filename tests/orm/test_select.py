@@ -2,7 +2,8 @@ from unittest import mock
 
 from sqlalchemy import Column, exc, func, literal, select, tuple_
 
-from clickhouse_sqlalchemy import types, Table, engines
+from clickhouse_sqlalchemy import types, Table, engines, \
+    get_declarative_base, select as ch_select
 from clickhouse_sqlalchemy.ext.clauses import Lambda
 from tests.testcase import NativeSessionTestCase, CompilationTestCase
 
@@ -257,6 +258,69 @@ class SelectTestCase(CompilationTestCase):
             "SELECT arrayFilter("
             "x -> x LIKE '%%World%%', ['Hello', 'abc World']"
             ") AS test"
+        )
+
+
+class EntitySelectTestCase(CompilationTestCase):
+    def setUp(self):
+        super().setUp()
+
+        class Entity(get_declarative_base(self.metadata())):
+            __tablename__ = 't1'
+
+            x = Column(types.Int32, primary_key=True)
+            y = Column(types.Array(types.Int32))
+
+            __table_args__ = (
+                engines.Memory(),
+            )
+
+        self.entity = Entity
+
+    def test_final(self):
+        query = ch_select(self.entity).where(self.entity.x == 1).final()
+        self.assertEqual(
+            self.compile(query, literal_binds=True),
+            'SELECT t1.x, t1.y FROM t1 FINAL WHERE t1.x = 1'
+        )
+
+    def test_final_in_subquery(self):
+        subquery = ch_select(self.entity.x).final().subquery()
+        query = select(func.count()).select_from(subquery)
+        self.assertEqual(
+            self.compile(query),
+            'SELECT count(*) AS count_1 '
+            'FROM (SELECT t1.x AS x FROM t1 FINAL) AS anon_1'
+        )
+
+    def test_sample(self):
+        query = ch_select(self.entity.x).sample(0.1)
+        self.assertEqual(
+            self.compile(query, literal_binds=True),
+            'SELECT t1.x FROM t1 SAMPLE 0.1'
+        )
+
+    def test_array_join(self):
+        query = ch_select(self.entity.x).array_join(self.entity.y)
+        self.assertEqual(
+            self.compile(query),
+            'SELECT t1.x FROM t1 ARRAY JOIN t1.y'
+        )
+
+    def test_group_by_with_totals(self):
+        query = ch_select(self.entity.x).group_by(self.entity.x)\
+            .with_totals()
+        self.assertEqual(
+            self.compile(query),
+            'SELECT t1.x FROM t1 GROUP BY t1.x WITH TOTALS'
+        )
+
+    def test_limit_by(self):
+        query = ch_select(self.entity.x).order_by(self.entity.x)\
+            .limit_by([self.entity.x], limit=1)
+        self.assertEqual(
+            self.compile(query, literal_binds=True),
+            'SELECT t1.x FROM t1 ORDER BY t1.x LIMIT 1 BY t1.x'
         )
 
 
