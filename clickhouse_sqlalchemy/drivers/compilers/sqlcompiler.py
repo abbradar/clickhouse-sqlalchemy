@@ -251,6 +251,10 @@ class ClickHouseSQLCompiler(compiler.SQLCompiler):
     ):
         text += ", ".join(inner_columns)
 
+        # The ORM compiles a new Select built from the one it was given,
+        # without the ClickHouse clauses, so they are read from the original.
+        ch_select = getattr(compile_state, 'select_statement', select)
+
         if self.linting & COLLECT_CARTESIAN_PRODUCTS:
             from_linter = compiler.FromLinter({}, set())
             warn_linting = self.linting & WARN_LINTING
@@ -291,15 +295,17 @@ class ClickHouseSQLCompiler(compiler.SQLCompiler):
         else:
             text += self.default_from()
 
-        sample_clause = getattr(select, '_sample_clause', None)
+        sample_clause = getattr(ch_select, '_sample_clause', None)
 
         if sample_clause is not None:
-            text += self.sample_clause(select, **kwargs)
+            text += self.sample_clause(ch_select, **kwargs)
 
-        if getattr(select, '_array_join', None) is not None:
-            text += select._array_join._compiler_dispatch(self, **kwargs)
+        array_join = getattr(ch_select, '_array_join', None)
 
-        final_clause = getattr(select, '_final_clause', None)
+        if array_join is not None:
+            text += array_join._compiler_dispatch(self, **kwargs)
+
+        final_clause = getattr(ch_select, '_final_clause', None)
 
         if final_clause is not None:
             text += self.final_clause()
@@ -315,7 +321,9 @@ class ClickHouseSQLCompiler(compiler.SQLCompiler):
             from_linter.warn()
 
         if select._group_by_clauses:
-            text += self.group_by_clause(select, **kwargs)
+            text += self.group_by_clause(
+                select, ch_select=ch_select, **kwargs
+            )
 
         if select._having_criteria:
             t = self._generate_delimited_and_list(
@@ -327,10 +335,10 @@ class ClickHouseSQLCompiler(compiler.SQLCompiler):
         if select._order_by_clauses:
             text += self.order_by_clause(select, **kwargs)
 
-        limit_by_clause = getattr(select, '_limit_by_clause', None)
+        limit_by_clause = getattr(ch_select, '_limit_by_clause', None)
 
         if limit_by_clause is not None:
-            text += self.limit_by_clause(select, **kwargs)
+            text += self.limit_by_clause(ch_select, **kwargs)
 
         if select._has_row_limiting_clause:
             text += self._row_limit_clause(select, **kwargs)
@@ -346,7 +354,10 @@ class ClickHouseSQLCompiler(compiler.SQLCompiler):
     def final_clause(self):
         return " \nFINAL"
 
-    def group_by_clause(self, select, **kw):
+    def group_by_clause(self, select, ch_select=None, **kw):
+        if ch_select is None:
+            ch_select = select
+
         text = ""
 
         group_by = select._group_by_clause._compiler_dispatch(
@@ -355,13 +366,13 @@ class ClickHouseSQLCompiler(compiler.SQLCompiler):
         if group_by:
             text = " GROUP BY " + group_by
 
-            if getattr(select, '_with_cube', False):
+            if getattr(ch_select, '_with_cube', False):
                 text += " WITH CUBE"
 
-            if getattr(select, '_with_rollup', False):
+            if getattr(ch_select, '_with_rollup', False):
                 text += " WITH ROLLUP"
 
-            if getattr(select, '_with_totals', False):
+            if getattr(ch_select, '_with_totals', False):
                 text += " WITH TOTALS"
 
         return text
