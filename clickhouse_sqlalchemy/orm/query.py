@@ -1,7 +1,9 @@
 from sqlalchemy import exc
 from sqlalchemy.sql.base import _generative
 from sqlalchemy.orm.query import Query as BaseQuery
+from sqlalchemy.sql.selectable import Select as StandardSelect
 
+from ..sql.selectable import Select
 from ..ext.clauses import (
     ArrayJoin,
     LeftArrayJoin,
@@ -21,6 +23,11 @@ class Query(BaseQuery):
 
     def _statement_20(self, *args, **kwargs):
         statement = super(Query, self)._statement_20(*args, **kwargs)
+        if type(statement) is StandardSelect:
+            # Only our Select puts the clauses below into its cache key.
+            clickhouse_statement = Select.__new__(Select)
+            clickhouse_statement.__dict__.update(statement.__dict__)
+            statement = clickhouse_statement
         statement._with_cube = self._with_cube
         statement._with_rollup = self._with_rollup
         statement._with_totals = self._with_totals
